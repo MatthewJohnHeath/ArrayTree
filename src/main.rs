@@ -17,61 +17,96 @@ impl Not for Direction{
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum NodeColour{Red, Black}
-#[derive(Debug, PartialEq, Eq, Default)]
-enum RBTreeOrBreadcrumb<'a, ContentType>{
+#[derive(Debug, PartialEq, Eq, Default, Clone)]
+enum RBTreeArrayStruct<ContentType>{
     #[default]
     Empty,
     Node{ 
         value:ContentType, 
-        left: &'a Self, 
-        right: &'a Self,
-        parent: &'a Self,
+        left_index: usize, 
+        right_index: usize,
+        parent_index: usize,
         colour: NodeColour
     },
-    Trail( &'a RBTreeOrBreadcrumb<'a, ContentType>)
+    NextInList( usize)
 } 
-impl<'a, ContentType> RBTreeOrBreadcrumb<'a, ContentType>{
-    fn child(&self, dir:Direction)->&Self{
-        match (self, dir){
-            (Self::Node{value:_, left: child, right:_, parent:_, colour:_}, Direction::Left) 
-            | (Self::Node{value:_, left: _, right:child, parent:_, colour:_}, Direction::Right) 
-                => &child,
-            _ => &Self::Empty
+#[derive(Debug, PartialEq, Eq, Clone)]
+struct RBTreeNode<'a, ContentType, const N:usize>{
+    array_struct : &'a RBTreeArrayStruct<ContentType>,
+    nodes : &'a [RBTreeArrayStruct< ContentType>; N]
+}
+//This is bad. Turn all Option<Self> into Self with Empty being the None.
+impl<'a, ContentType, const N:usize>  RBTreeNode<'a, ContentType,  N> {
+    fn left_child(&self) -> Self {
+        let array_struct ={
+            if let RBTreeArrayStruct::Node{value:_, left_index: i, right_index: _ , parent_index: _ , colour: _} = self.array_struct{
+                match self.nodes.get(*i){
+                    Some(n)=> n,
+                    None => &RBTreeArrayStruct::Empty
+                }
+            }
+            else{&RBTreeArrayStruct::Empty}
+        };
+        Self{array_struct, nodes: self.nodes}
+
+    }
+
+    fn right_child(&self) -> Option<Self>{
+        if let RBTreeArrayStruct::Node{value:_, left_index: _, right_index: i , parent_index: _ , colour: _} = self.array_struct{
+            self.nodes.get(*i)
+            .map(|node| Self{array_struct: node, nodes : self.nodes})
+        }
+        else{None}
+    }
+
+    fn parent(&self) -> Option<Self>{
+        if let RBTreeArrayStruct::Node{value:_, left_index: _, right_index: _ , parent_index: i , colour: _} = self.array_struct{
+            self.nodes.get(*i)
+            .map(|node| Self{array_struct: node, nodes : self.nodes})
+        }
+        else{None}
+    }
+
+    fn value(&self) -> Option<&ContentType>{
+        match self.array_struct{
+            RBTreeArrayStruct::Node{value:v, left_index: _, right_index: _ , parent_index: _ , colour: _} => Some(v),
+            _ => None
         }
     }
-}
-struct ArrayTree<'a, ContentType, const N:usize>{
-    all_nodes : [RBTreeOrBreadcrumb<'a, ContentType>; N],
-    root : &'a RBTreeOrBreadcrumb<'a, ContentType>,
-    recycling : &'a RBTreeOrBreadcrumb<'a, ContentType>,
-    unused : core::slice::Iter<'a, RBTreeOrBreadcrumb<'a, ContentType>>
+
+    fn colour(&self) -> Option<NodeColour>{
+        match self.array_struct{
+            RBTreeArrayStruct::Node{value:_, left_index: _, right_index: _ , parent_index: _ , colour: c} => Some(*c),
+            _ => None
+        }
+    }
+
+    fn successor(&self) -> Option<Self>{
+        if let RBTreeArrayStruct::NextInList(i) = self.array_struct{
+            self.nodes.get(*i)
+            .map(|node| Self{array_struct: node, nodes : self.nodes})
+        }
+        else{None}
+
+    }
 }
 
-impl<'a, ContentType,  const N: usize> ArrayTree<'a, ContentType,  N> {
-    
-    fn new() -> Self {
-        let mut uninit :MaybeUninit< Self> = MaybeUninit::uninit();
-        let ptr = uninit.as_mut_ptr();
-        unsafe{ addr_of_mut!((*ptr).all_nodes).write([();N].map(|_| RBTreeOrBreadcrumb::Empty)); }
-        unsafe{ addr_of_mut!((*ptr).root).write(&RBTreeOrBreadcrumb::Empty) ;}
-        unsafe{ addr_of_mut!((*ptr).recycling).write(&RBTreeOrBreadcrumb::Empty) ;}
-        unsafe{ addr_of_mut!((*ptr).unused).write((*ptr).all_nodes.iter()) ;}
-        unsafe { uninit.assume_init() }
+#[derive(Debug, PartialEq, Eq, Clone)]
+struct ArrayTree<ContentType, const N:usize>{
+    all_nodes : [RBTreeArrayStruct< ContentType>; N],
+    root_index : usize,
+    never_used_start : usize,
+    recycling_start : usize
+}
+
+impl<ContentType, const N:usize>  ArrayTree< ContentType,  N>{
+    fn new()->Self{
+        Self { all_nodes: [(); N].map(|_| RBTreeArrayStruct::Empty), root_index: N, never_used_start: 0, recycling_start: N }
     }
 }
-impl<'a, ContentType,  const N: usize> ArrayTree<'a, ContentType,  N> {
-    fn obtain_next (&mut self)->&RBTreeOrBreadcrumb< 'a, ContentType>{
-        if let RBTreeOrBreadcrumb::Trail(next) = self.recycling{
-            let got : &'a RBTreeOrBreadcrumb< 'a, ContentType> = self.recycling; 
-            self.recycling = next;
-            got
-        }
-        else{
-            self.unused.next()
-            .unwrap_or(&RBTreeOrBreadcrumb::Empty)
-        }
-    }
-}
+
+
+
 fn main() {
     let tree = ArrayTree::<i32, 100>::new();
 
